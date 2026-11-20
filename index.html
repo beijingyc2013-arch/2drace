@@ -242,62 +242,153 @@ function spawn(){
   }
 }
 
+
 function updateTraffic(dt){
   spawnTimer-=dt;
-  if(spawnTimer<=0){spawn();spawnTimer=(1.3-.7*diff())*rand(.8,1.2)}
+
+  if(spawnTimer<=0){
+    spawn();
+    spawnTimer=(1.3-.7*diff())*rand(.8,1.2);
+  }
+
   traffic.sort((a,b)=>a.y-b.y);
+
   for(const v of traffic){
     dims(v);
-    // voorligger zoeken
-    let lead=null,gap=1e9;
+
+    // Zoek de dichtstbijzijnde voorligger
+    let lead=null;
+    let gap=Infinity;
+
     for(const o of traffic){
-      if(o===v||o.y>=v.y||Math.abs(o.lx-v.lx)>=.9)continue;
+      if(o===v)continue;
+
+      const sameLane=
+        Math.abs(o.lx-v.lx)<.65 ||
+        o.lane===v.lane ||
+        o.targetLane===v.lane ||
+        v.targetLane===o.lane;
+
+      if(!sameLane)continue;
+
+      if(o.y>=v.y)continue;
+
       const g=v.y-(o.y+o.h);
-      if(g<gap){gap=g;lead=o}
+
+      if(g<gap){
+        gap=g;
+        lead=o;
+      }
     }
-    // ook de speler is een voorligger (auto's remmen of halen in als jij langzaam rijdt)
-    if(player.y<v.y&&Math.abs(player.lx-v.lx)<.9){
+
+    // De speler is ook een voorligger
+    if(player.y<v.y && Math.abs(player.lx-v.lx)<.75){
       const g=v.y-(player.y+player.h);
-      if(g<gap){gap=g;lead={speed:speed,y:player.y,h:player.h,lx:player.lx}}
+
+      if(g<gap){
+        gap=g;
+        lead={
+          y:player.y,
+          h:player.h,
+          speed:speed,
+          lx:player.lx,
+          lane:Math.round(player.lx)
+        };
+      }
     }
-    // snelheid regelen
+
+    // Bereken gewenste snelheid
     let target=v.desired;
+
     if(lead){
-      const fd=30+v.speed*.6;
-      if(gap<fd*2.2&&lead.speed<target)
-        target=gap<fd?Math.max(12,lead.speed-12*(1-gap/fd)):lead.speed;
+      const safeGap=35+v.speed*.9;
+      const brakingGap=safeGap*3;
+
+      if(gap<brakingGap){
+        const urgency=Math.max(
+          0,
+          Math.min(1,(brakingGap-gap)/(brakingGap-safeGap))
+        );
+
+        target=Math.min(
+          target,
+          lead.speed-(v.speed-lead.speed)*urgency*.8
+        );
+      }
+
+      if(gap<safeGap){
+        target=Math.min(target,lead.speed);
+      }
     }
-    v.braking=v.speed>target+3;
-    if(v.speed>target)v.speed=Math.max(target,v.speed-35*dt);
-    else v.speed=Math.min(target,v.speed+10*dt);
+
+    target=Math.max(8,target);
+
+    // Geleidelijk remmen en versnellen
+    v.braking=v.speed>target+2;
+
+    if(v.speed>target){
+      v.speed=Math.max(target,v.speed-65*dt);
+    }else{
+      v.speed=Math.min(target,v.speed+8*dt);
+    }
+
+    // Beweging zonder plotselinge positieverplaatsingen
     v.y+=(speed-v.speed)*K*dt;
-    if(lead){ // vangnet: nooit door de voorligger heen
-      const lim=lead.y+lead.h+3;
-      if(v.y<lim){v.y=lim;v.speed=Math.min(v.speed,lead.speed)}
-    }
-    // toestanden: cruise -> signal (knipperen) -> change (wisselen)
+
+    // Verkeerslogica
     if(v.state==="cruise"){
-      v.cool-=dt;if(v.cool<=0)decide(v,lead,gap);
+      v.cool-=dt;
+
+      if(v.cool<=0){
+        decide(v,lead,gap);
+      }
+
     }else if(v.state==="signal"){
       v.timer-=dt;
+
       if(v.timer<=0){
-        if(safe(v,v.targetLane))v.state="change";
-        else{v.state="cruise";v.targetLane=null;v.dir=0;v.cool=3}
+        if(safe(v,v.targetLane)){
+          v.state="change";
+        }else{
+          v.state="cruise";
+          v.targetLane=null;
+          v.dir=0;
+          v.cool=3;
+        }
       }
-    }else{
-      const rate=v.aggressive?1.3:.9,d=v.targetLane-v.lx;
+
+    }else if(v.state==="change"){
+      const rate=v.aggressive?1.3:.9;
+      const d=v.targetLane-v.lx;
+
       v.lx+=Math.sign(d)*Math.min(Math.abs(d),rate*dt);
+
       if(Math.abs(v.targetLane-v.lx)<.01){
-        v.lx=v.lane=v.targetLane;v.targetLane=null;v.dir=0;v.state="cruise";
+        v.lx=v.targetLane;
+        v.lane=v.targetLane;
+        v.targetLane=null;
+        v.dir=0;
+        v.state="cruise";
         v.cool=v.aggressive?rand(3,5):rand(6,10);
       }
     }
+
+    // Richtingaanwijzers
     v.sig=v.state==="cruise"?0:v.dir;
-    const tilt=v.state==="change"?v.dir*(v.aggressive?1.3:.9)*.09:0;
+
+    // Kleine kanteling tijdens wisselen
+    const tilt=v.state==="change"
+      ?v.dir*(v.aggressive?1.3:.9)*.09
+      :0;
+
     v.ang+=(tilt-v.ang)*Math.min(1,dt*8);
   }
+
+  // Verwijder auto's buiten beeld
   traffic=traffic.filter(v=>v.y<H+150&&v.y>-500);
 }
+
+
 
 /* ---------- spel ---------- */
 function update(dt){
