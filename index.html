@@ -63,13 +63,15 @@ const carColors=["#2878d0","#f5c542","#f5f5f5","#17191d","#32a852","#9149c9","#e
 
 let W,H,DPR,roadX,roadW,laneW;
 let running=false,paused=false,debug=false;
-let score=0,distance=0,speed=120,roadOffset=0,spawnTimer=0,clock=0,lastTime=0;
+let playT=0,score=0,distance=0,speed=120,roadOffset=0,spawnTimer=0,clock=0,lastTime=0;
 let traffic=[],keys={};
 let best=Number(localStorage.getItem("highwayBest")||0);
 const player={lx:2,y:0,w:30,h:54,vx:0,ang:0,sig:0,braking:false,color:"#2878d0"};
 $("best").textContent=best;
 
 const rand=(a,b)=>Math.random()*(b-a)+a;
+const diff=()=>Math.min(1,playT/150);   // moeilijkheid 0..1 in 150 s
+const cruise=()=>85+50*diff();            // kruissnelheid 85 -> max 135
 const cx=v=>roadX+(v.lx+.5)*laneW;
 
 function resize(){
@@ -226,23 +228,23 @@ function decide(v,lead,gap){
 }
 
 function spawn(){
-  const truck=Math.random()<.14,ag=!truck&&Math.random()<.22;
+  const d=diff(),truck=Math.random()<.08+.08*d,ag=!truck&&Math.random()<.04+.26*d,back=speed<80&&Math.random()<.6;
   const wf=truck?.62:.56,ratio=truck?2.8:1.8;
   const lanes=[...Array(LANES).keys()].sort(()=>Math.random()-.5);
   for(const L of lanes){
-    if(traffic.some(o=>(Math.abs(o.lx-L)<.9||o.targetLane===L)&&o.y<190))continue;
-    const desired=truck?rand(38,55):ag?rand(70,88):rand(48,75);
+    if(traffic.some(o=>(Math.abs(o.lx-L)<.9||o.targetLane===L)&&(back?o.y>H-260:o.y<190)))continue;
+    const desired=back?rand(58,85):truck?rand(38,55):ag?rand(70,88):rand(48,75);
     const v={lx:L,lane:L,home:L,targetLane:null,y:0,wf,ratio,w:0,h:0,ang:0,sig:0,dir:0,
       color:ag?"#e02020":carColors[Math.floor(Math.random()*carColors.length)],
       truck,aggressive:ag,speed:desired,desired,state:"cruise",timer:0,
       cool:rand(2,5),braking:false};
-    dims(v);v.y=-v.h-20;traffic.push(v);return;
+    dims(v);v.y=back?H+30:-v.h-20;traffic.push(v);return;
   }
 }
 
 function updateTraffic(dt){
   spawnTimer-=dt;
-  if(spawnTimer<=0){spawn();spawnTimer=rand(.45,.8)}
+  if(spawnTimer<=0){spawn();spawnTimer=(1.3-.7*diff())*rand(.8,1.2)}
   traffic.sort((a,b)=>a.y-b.y);
   for(const v of traffic){
     dims(v);
@@ -252,6 +254,11 @@ function updateTraffic(dt){
       if(o===v||o.y>=v.y||Math.abs(o.lx-v.lx)>=.9)continue;
       const g=v.y-(o.y+o.h);
       if(g<gap){gap=g;lead=o}
+    }
+    // ook de speler is een voorligger (auto's remmen of halen in als jij langzaam rijdt)
+    if(player.y<v.y&&Math.abs(player.lx-v.lx)<.9){
+      const g=v.y-(player.y+player.h);
+      if(g<gap){gap=g;lead={speed:speed,y:player.y,h:player.h,lx:player.lx}}
     }
     // snelheid regelen
     let target=v.desired;
@@ -289,7 +296,7 @@ function updateTraffic(dt){
     const tilt=v.state==="change"?v.dir*(v.aggressive?1.3:.9)*.09:0;
     v.ang+=(tilt-v.ang)*Math.min(1,dt*8);
   }
-  traffic=traffic.filter(v=>v.y<H+150);
+  traffic=traffic.filter(v=>v.y<H+150&&v.y>-500);
 }
 
 /* ---------- spel ---------- */
@@ -298,10 +305,11 @@ function update(dt){
   const L=keys.ArrowLeft||keys.a||keys.A,R=keys.ArrowRight||keys.d||keys.D;
   const brake=!!(L&&R);
   player.braking=brake;
-  if(brake)speed=Math.max(100,speed-50*dt);
-  else speed=Math.min(220,speed+dt*.7);
+  playT+=dt;
+  if(brake)speed=Math.max(3,speed-90*dt);
+  else speed=Math.min(cruise(),speed+60*dt);
   const dir=brake?0:(R?1:0)-(L?1:0);
-  player.vx+=(dir*3.2-player.vx)*Math.min(1,dt*9);
+  player.vx+=(dir*3.2*Math.min(1,speed/40)-player.vx)*Math.min(1,dt*9);
   player.lx+=player.vx*dt;
   const m=(10+player.w/2)/laneW-.5,lo=m,hi=LANES-1-m;
   if(player.lx<lo){player.lx=lo;player.vx=0}
@@ -342,7 +350,7 @@ let wake=null;
 async function keepAwake(){try{if("wakeLock"in navigator)wake=await navigator.wakeLock.request("screen")}catch(e){}}
 
 function startGame(){
-  score=0;distance=0;speed=120;traffic=[];spawnTimer=.5;
+  score=0;distance=0;speed=80;playT=0;traffic=[];spawnTimer=.5;
   paused=false;running=true;
   player.lx=(LANES-1)/2;player.vx=0;player.ang=0;player.sig=0;player.braking=false;
   $("overlay").style.display="none";
@@ -413,3 +421,4 @@ requestAnimationFrame(loop);
 </script>
 </body>
 </html>
+
