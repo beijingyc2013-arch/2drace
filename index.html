@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="nl">
 <head>
@@ -259,22 +258,24 @@ function updateTraffic(dt){
     // ook de speler is een voorligger (auto's remmen of halen in als jij langzaam rijdt)
     if(player.y+player.h-6<=v.y&&Math.abs(player.lx-v.lx)<.9){
       const g=v.y-(player.y+player.h);
-      if(g<gap){gap=g;lead={speed:speed,y:player.y,h:player.h,lx:player.lx}}
+      if(g<gap){gap=g;lead={speed:speed,y:player.y,h:player.h,lx:player.lx,isPlayer:true}}
     }
-    // snelheid regelen
-    let target=v.desired;
+    // snelheid regelen (alleen snelheid, nooit de positie van de auto aanpassen)
+    let target=v.desired,dec=35;
     if(lead){
       const fd=30+v.speed*.6;
       if(gap<fd*2.2&&lead.speed<target)
-        target=gap<fd?Math.max(12,lead.speed-12*(1-gap/fd)):lead.speed;
+        target=gap<fd?Math.max(3,lead.speed-12*(1-gap/fd)):lead.speed;
+      if(gap<fd*1.5&&lead.speed<v.speed)dec=110; // noodrem
     }
     v.braking=v.speed>target+3;
-    if(v.speed>target)v.speed=Math.max(target,v.speed-35*dt);
+    if(v.speed>target)v.speed=Math.max(target,v.speed-dec*dt);
     else v.speed=Math.min(target,v.speed+10*dt);
     v.y+=(speed-v.speed)*K*dt;
-    if(lead){ // vangnet: nooit door de voorligger heen
-      const lim=lead.y+lead.h+3;
-      if(v.y<lim){v.y=lim;v.speed=Math.min(v.speed,lead.speed)}
+    // alleen bij echte overlap tussen twee AI-auto's: zacht uit elkaar duwen
+    if(lead&&!lead.isPlayer){
+      const ov=lead.y+lead.h-v.y;
+      if(ov>0)v.y+=Math.min(ov,60*dt);
     }
     // toestanden: cruise -> signal (knipperen) -> change (wisselen)
     if(v.state==="cruise"){
